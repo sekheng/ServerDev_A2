@@ -1,7 +1,8 @@
 """`main` is the top level module for your Flask application."""
 
 # Import the Flask Framework
-from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort
+from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort, session, escape
+from google.appengine.ext import ndb
 # import requests failed miserably!
 import logging
 import urllib2
@@ -19,20 +20,29 @@ app.secret_key = os.urandom(24)
 #logger = logging.getLogger()
 #logging.getLogger().setLevel(logging.DEBUG)
 
-
-
+class User(ndb.Model):
+	Username = ndb.StringProperty()
+	Password = ndb.StringProperty()
+	UserType = ndb.StringProperty()
+	games_created = ndb.IntegerProperty()
+	games_lost = ndb.IntegerProperty()
+	games_played = ndb.IntegerProperty()
+	games_won = ndb.IntegerProperty()
 
 @app.route('/')
 def main():
     """Return a friendly HTTP greeting."""
     # assign a new id to the player if 
+    signed_inFlag = False
+    sign_in_Username = ''
     if 'user' in session:
         logging.debug('Logged in as %s' % escape(session['user']))
+        sign_in_Username = session['username']
+        signed_inFlag = True
     else:
         session['user'] = "".join(random.choice(string.lowercase) for x in xrange(5))
         session['score'] = 0
         logging.debug("New user, %s" % (str(session)))
-
     game_list = []
     for i in range(10):
         game = {}
@@ -40,7 +50,7 @@ def main():
         game['hint'] = 'Game hint %d' % i
         game['game_id'] = 'gameid%d' % i
         game_list.append(game)
-    return render_template('main.html', game_list=game_list, signed_in = True, sign_in_name = 'Tokki')
+    return render_template('main.html', game_list=game_list, signed_in = signed_inFlag, sign_in_name = sign_in_Username)
 
 @app.route('/games/<game_id>', methods=['GET', 'DELETE'])
 def games(game_id):
@@ -54,7 +64,7 @@ def games(game_id):
     if request.method == 'DELETE':
         response_dict = {}
         response_dict['message'] = "Game was deleted"
-        logging.debug(request.data);
+        logging.debug(request.data)
         return json.dumps(response_dict)
 
     return render_template('game.html', game_property = game_property)
@@ -65,7 +75,7 @@ def game_check_letter(game_id):
     response_dict['game_state'] = "ONGOING"
     response_dict['word_state'] = "____"
     response_dict['bad_guesses'] = 3;
-    logging.debug(request.data);
+    logging.debug(request.data)
 
     return json.dumps(response_dict)
 
@@ -202,15 +212,29 @@ def get_score():
         session['games_lost'] = 0
     
     return json.dumps({'games_won': session.get('games_won', 0), 'games_lost': session.get('games_lost', 0) })
-    
+
+@app.errorhandler(400)
+def page_forbidden(e):
+	logging.debug('unexpected error: {}'.format(e), 400)
+	return redirect('https://http.cat/400')
+
+@app.errorhandler(403)
+def page_not_found(e):
+	logging.debug('unexpected error: {}'.format(e), 403)
+	return redirect('https://http.cat/403')
 
 @app.errorhandler(404)
 def page_not_found(e):
-    """Return a custom 404 error."""
-    return 'Sorry, Nothing at this URL.', 404
+	logging.debug('unexpected error: {}'.format(e), 404)
+	return redirect('https://http.cat/404')
 
+@app.errorhandler(405)
+def page_not_found(e):
+	logging.debug('unexpected error: {}'.format(e), 405)
+	return redirect('https://http.cat/405')
 
 @app.errorhandler(500)
 def application_error(e):
     """Return a custom 500 error."""
-    return 'Sorry, unexpected error: {}'.format(e), 500
+    logging.debug('unexpected error: {}'.format(e), 500)
+    return redirect('https://http.cat/500')
