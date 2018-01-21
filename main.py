@@ -10,6 +10,7 @@ import random
 import requests
 import os
 import string
+import json
 
 app = Flask(__name__)
 # Note: We don't need to call run() since our application is embedded within
@@ -22,7 +23,7 @@ app.secret_key = os.urandom(24)
 
 class User(ndb.Model):
 	Username = ndb.StringProperty()
-	Password = ndb.StringProperty()
+	Password = ndb.TextProperty()
 	UserType = ndb.StringProperty()
 	games_created = ndb.IntegerProperty()
 	games_lost = ndb.IntegerProperty()
@@ -37,7 +38,7 @@ def main():
     sign_in_Username = ''
     if 'user' in session:
         logging.debug('Logged in as %s' % escape(session['user']))
-        sign_in_Username = session['username']
+        sign_in_Username = session['user']
         signed_inFlag = True
     else:
         session['user'] = "".join(random.choice(string.lowercase) for x in xrange(5))
@@ -58,15 +59,12 @@ def games(game_id):
     game_property["hint"] = "I'm a word"
     game_property["word_length"] = 7
     game_property["game_id"] = game_id
-
     logging.debug("In game %s" % game_id)
-
     if request.method == 'DELETE':
         response_dict = {}
         response_dict['message'] = "Game was deleted"
         logging.debug(request.data)
         return json.dumps(response_dict)
-
     return render_template('game.html', game_property = game_property)
 
 @app.route('/games/check_letter/<game_id>', methods=['POST'])
@@ -91,9 +89,17 @@ def create_game():
 
 @app.route('/token', methods=['GET', 'POST'])
 def token():
-    logging.debug(request.data)
-    logging.debug(request.headers)
-    logging.debug("content-type" + str(request.content_type))
+	# Where we check for the sign in......for some reason it is more complicated than usual!
+    logging.info(request.data)
+    logging.info(request.headers)
+    logging.info("content-type" + str(request.content_type))
+    auth = request.authorization
+    if request.method == 'GET':
+    	# this is the sign in method! So it will need to query from the ndb!
+    	pass
+    elif request.method == 'POST':
+    	# this is the sign up method!
+    	pass
     # generate the token, store it
     # return the token to the client
     response_dict = {}
