@@ -14,3 +14,4 @@ class RandomWord(ndb.Model):
     IsDeleted = ndb.BooleanProperty()
     Word = ndb.StringProperty()
     Hint = ndb.StringProperty()
+

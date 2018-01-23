@@ -80,7 +80,7 @@ def game_check_letter(game_id):
     logging.debug(request.data)
     return json.dumps(response_dict)
 
-@app.route('/games/<word_length>', methods=['GET', 'POST', 'DELETE'])
+@app.route('/games/<int:word_length>', methods=['GET', 'POST', 'DELETE'])
 def ongoing_games(word_length):
     response_dict = {}
     if request.method == 'GET' or request.method == 'POST':
@@ -117,7 +117,8 @@ def token():
     if request.method == 'GET':
         # checks whether there is such as player in the database and password is the same
         if playerData is None or playerData.Password != auth.password:
-            abort(404)
+            logging.info("Username or Password is wrong!")
+            #abort(404)
             response_dict['error'] = 'User not found'
         else:
             # this is the sign in method! So it will need to query from the ndb!
@@ -267,12 +268,12 @@ def get_score():
     return json.dumps({'games_won': session.get('games_won', 0), 'games_lost': session.get('games_lost', 0) })
 
 @app.errorhandler(400)
-def page_forbidden(e):
+def page_bad_request(e):
     logging.info('unexpected error: {}'.format(e), 400)
     return redirect('https://http.cat/400')
 
 @app.errorhandler(403)
-def page_not_found(e):
+def page_not_forbidden(e):
     logging.info('unexpected error: {}'.format(e), 403)
     return redirect('https://http.cat/403')
 
@@ -282,12 +283,12 @@ def page_not_found(e):
     return redirect('https://http.cat/404')
 
 @app.errorhandler(405)
-def page_not_found(e):
+def page_method_not_allowed(e):
     logging.info('unexpected error: {}'.format(e), 405)
     return redirect('https://http.cat/405')
 
 @app.errorhandler(409)
-def user_conflict(e):
+def page_user_conflict(e):
     logging.info('unexpected error: {}'.format(e), 409)
     return redirect('https://http.cat/409')
 
