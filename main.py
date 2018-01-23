@@ -11,6 +11,7 @@ import requests
 import os
 import string
 import json
+from MyModel import User
 
 app = Flask(__name__)
 # Note: We don't need to call run() since our application is embedded within
@@ -21,14 +22,14 @@ app.secret_key = os.urandom(24)
 #logger = logging.getLogger()
 #logging.getLogger().setLevel(logging.DEBUG)
 
-class User(ndb.Model):
-	Username = ndb.StringProperty()
-	Password = ndb.TextProperty()
-	UserType = ndb.StringProperty()
-	games_created = ndb.IntegerProperty()
-	games_lost = ndb.IntegerProperty()
-	games_played = ndb.IntegerProperty()
-	games_won = ndb.IntegerProperty()
+class UserConflict(Exception):
+	status_code = 409
+	def __init__(self, message, status_code=None, payload=None):
+		Exception.__init__(self)
+		self.message = message
+		if status_code is not None:
+			self.status_code = status_code
+		self.payload = payload
 
 @app.route('/')
 def main():
@@ -37,13 +38,16 @@ def main():
     signed_inFlag = False
     sign_in_Username = ''
     if 'user' in session:
-        logging.debug('Logged in as %s' % escape(session['user']))
+        # if it is the admin, redirect it to the admin!
+        if session['usertype'] == 'Admin':
+            return admin_page()
+        logging.info('Logged in as %s' % escape(session['user']))
         sign_in_Username = session['user']
         signed_inFlag = True
     else:
         session['user'] = "".join(random.choice(string.lowercase) for x in xrange(5))
         session['score'] = 0
-        logging.debug("New user, %s" % (str(session)))
+        logging.info("New user, %s" % (str(session)))
     game_list = []
     for i in range(10):
         game = {}
@@ -74,7 +78,18 @@ def game_check_letter(game_id):
     response_dict['word_state'] = "____"
     response_dict['bad_guesses'] = 3;
     logging.debug(request.data)
+    return json.dumps(response_dict)
 
+@app.route('/games/<word_length>', methods=['GET', 'POST', 'DELETE'])
+def ongoing_games(word_length):
+    response_dict = {}
+    if request.method == 'GET' or request.method == 'POST':
+        pass
+    elif request.method == 'DELETE':
+        pass
+    else:
+        abort(405)
+        response_dict['error'] = 'Method not allowed'
     return json.dumps(response_dict)
 
 @app.route('/games', methods=['POST'])
@@ -89,25 +104,59 @@ def create_game():
 
 @app.route('/token', methods=['GET', 'POST'])
 def token():
-	# Where we check for the sign in......for some reason it is more complicated than usual!
     logging.info(request.data)
     logging.info(request.headers)
     logging.info("content-type" + str(request.content_type))
     auth = request.authorization
-    if request.method == 'GET':
-    	# this is the sign in method! So it will need to query from the ndb!
-    	pass
-    elif request.method == 'POST':
-    	# this is the sign up method!
-    	pass
-    # generate the token, store it
-    # return the token to the client
+    UserDatabase = User.query()
     response_dict = {}
-    response_dict['token'] = 'This is my generated token'
+    # we query for any data from the database
+    #TODO: encrypt the password!
+    filteredPlayerData = UserDatabase.filter(User.Username == auth.username)
+    playerData = filteredPlayerData.get()
+    if request.method == 'GET':
+        # checks whether there is such as player in the database and password is the same
+        if playerData is None or playerData.Password != auth.password:
+            abort(404)
+            response_dict['error'] = 'User not found'
+        else:
+            # this is the sign in method! So it will need to query from the ndb!
+            session['user'] = auth.username
+            session['score'] = playerData.games_lost
+            session['usertype'] = playerData.UserType
+            logging.info("Player Token ID: {}".format(playerData.key.id()))
+            response_dict['token'] = playerData.key.id()
+    #Ensure that there is no player data!
+    elif request.method == 'POST':
+        # this is the sign up method! Store the user name and password at the server
+        if playerData is not None:
+            #throw an error!
+            abort(409)
+            response_dict['error'] = 'Conflicitng user id'
+        else:
+            # then begin to sign up the user!
+            playerData = User(Username = auth.username, Password = auth.password, UserType = 'User', games_created = 0, games_lost = 0, games_played = 0, games_won = 0)
+            # then u put the data into the datastore!
+            playerData.put()
+            session['user'] = auth.username
+            session['score'] = 0
+            session['usertype'] = playerData.UserType
+            logging.info("Player Token ID: {}".format(playerData.key.id()))
+            response_dict['token'] = playerData.key.id()
+            # generate the token, store it
+    else:
+        response_dict['error'] = 'Method not allowed'
+        abort(405)
+    # return the token to the client
     return json.dumps(response_dict)
 
 @app.route('/admin')
 def admin_page():
+    if 'user' not in session or session['usertype'] != 'Admin':
+        response_dict = {}
+        response_dict['error'] = 'You do not have permission to perform this operation'
+        abort(403)
+        return json.dumps(response_dict)
     return render_template('admin.html')
 
 @app.route('/admin/players')
@@ -168,8 +217,6 @@ def check_letter():
     if 'word_to_guess' not in session:
         reset_score()
         return redirect(url_for('main'))
-
-
     content = request.get_json()
     letter = content.get('guess', None).upper()
     logging.debug("Guessed letter %s" % letter)
@@ -221,26 +268,31 @@ def get_score():
 
 @app.errorhandler(400)
 def page_forbidden(e):
-	logging.debug('unexpected error: {}'.format(e), 400)
-	return redirect('https://http.cat/400')
+    logging.info('unexpected error: {}'.format(e), 400)
+    return redirect('https://http.cat/400')
 
 @app.errorhandler(403)
 def page_not_found(e):
-	logging.debug('unexpected error: {}'.format(e), 403)
-	return redirect('https://http.cat/403')
+    logging.info('unexpected error: {}'.format(e), 403)
+    return redirect('https://http.cat/403')
 
 @app.errorhandler(404)
 def page_not_found(e):
-	logging.debug('unexpected error: {}'.format(e), 404)
-	return redirect('https://http.cat/404')
+    logging.info('unexpected error: {}'.format(e), 404)
+    return redirect('https://http.cat/404')
 
 @app.errorhandler(405)
 def page_not_found(e):
-	logging.debug('unexpected error: {}'.format(e), 405)
-	return redirect('https://http.cat/405')
+    logging.info('unexpected error: {}'.format(e), 405)
+    return redirect('https://http.cat/405')
+
+@app.errorhandler(409)
+def user_conflict(e):
+    logging.info('unexpected error: {}'.format(e), 409)
+    return redirect('https://http.cat/409')
 
 @app.errorhandler(500)
 def application_error(e):
     """Return a custom 500 error."""
-    logging.debug('unexpected error: {}'.format(e), 500)
+    logging.info('unexpected error: {}'.format(e), 500)
     return redirect('https://http.cat/500')

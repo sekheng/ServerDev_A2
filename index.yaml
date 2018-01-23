@@ -10,7 +10,12 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-- kind: UserDatabase
+- kind: RandomWordsDatabase
+  properties:
+  - name: IsDeleted
+  - name: Word
+
+- kind: User
   properties:
   - name: Password
   - name: UserType
@@ -19,8 +24,3 @@ indexes:
   - name: games_lost
   - name: games_played
   - name: games_won
-
-- kind: RandomWordsDatabase
-  properties:
-  - name: IsDeleted
-  - name: Word
