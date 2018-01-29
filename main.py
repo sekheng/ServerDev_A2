@@ -11,7 +11,7 @@ import requests
 import os
 import string
 import json
-from MyModel import User
+from MyModel import *
 
 app = Flask(__name__)
 # Note: We don't need to call run() since our application is embedded within
@@ -45,31 +45,99 @@ def main():
         sign_in_Username = session['user']
         signed_inFlag = True
     else:
-        session['user'] = "".join(random.choice(string.lowercase) for x in xrange(5))
+        session['user'] = ""
         session['score'] = 0
         logging.info("New user, %s" % (str(session)))
-    game_list = []
-    for i in range(10):
-        game = {}
-        game['word_length'] = i
-        game['hint'] = 'Game hint %d' % i
-        game['game_id'] = 'gameid%d' % i
-        game_list.append(game)
-    return render_template('main.html', game_list=game_list, signed_in = signed_inFlag, sign_in_name = sign_in_Username)
+    game_list = get_all_games()
+    return render_template('main.html', game_list = json.loads(game_list), signed_in = signed_inFlag, sign_in_name = sign_in_Username)
 
-@app.route('/games/<game_id>', methods=['GET', 'DELETE'])
+@app.route('/games', methods=['GET', 'DELETE'])
+def get_all_games():
+    logging.info("Getting all games")
+    response_dict = {}
+    if request.method == 'GET':
+        # access all of the games!
+        response_dict = []
+        tableOfRandomWord = WordGame.query(WordGame.is_deleted == False)
+        for randomword in tableOfRandomWord:
+            respondWord = {'hint' : randomword.hint, 'word_length' : randomword.word_length, 'game_id' : str(randomword.key.id())}
+            response_dict.append(respondWord)
+    elif request.method == "DELETE":
+        if 'user' not in session and session['usertype'] != 'Admin':
+            response_dict['error'] = 'You do not have permission to perform this operation'
+            abort(403)
+        else:
+            # get all of the words and delete it!
+            AllNotDeletedWords = WordGame.query(WordGame.is_deleted == False)
+            for notDeletedWord in AllNotDeletedWords:
+                notDeletedWord.is_deleted = True
+    else:
+        response_dict['error'] = 'Method not allowed'
+    return json.dumps(response_dict)
+
+@app.route('/games/<string:game_id>', methods=['GET', 'DELETE'])
 def games(game_id):
+    logging.info("Getting specific game: " + game_id)
     game_property = {}
-    game_property["hint"] = "I'm a word"
-    game_property["word_length"] = 7
-    game_property["game_id"] = game_id
-    logging.debug("In game %s" % game_id)
-    if request.method == 'DELETE':
-        response_dict = {}
-        response_dict['message'] = "Game was deleted"
-        logging.debug(request.data)
-        return json.dumps(response_dict)
-    return render_template('game.html', game_property = game_property)
+    wordDatabase = WordGame.query(WordGame.game_id == game_id)
+    specificWord = wordDatabase.get()
+    if specificWord is None:
+        game_property['error'] = 'Game not found'
+    else:
+        if 'user' not in session:
+            abort(403)
+            game_property['error'] = 'You do not have permission to perform this operation'
+        elif request.method == 'GET':
+            game_property['hint'] = specificWord.hint
+            game_property['word_length'] = specificWord.word_length
+            game_property['game_id'] = specificWord.game_id
+            return render_template('game.html', game_property = game_property)
+        elif request.method == 'DELETE':
+            specificWord.is_deleted = True
+            specificWord.put()
+            game_property['message'] = 'Game was deleted'
+        else:
+            game_property['error'] = "Method not allowed"
+            abort(405)
+    return game_property
+
+@app.route('/games/<int:word_length>', methods=['GET'])
+def ongoing_games(word_length):
+    logging.info("Getting words with specific word_length!")
+    response_dict = {}
+    if request.method == 'GET':
+        response_dict = []
+        WordsWithSpecificLength = WordGame.query(ndb.AND(WordGame.word_length == word_length, WordGame.is_deleted == False))
+        for word in WordsWithSpecificLength:
+            TheWord = { hint : word.hint, word_length : word.word_length, game_id : word.game_id }
+            response_dict.append(TheWord)
+    else:
+        abort(405)
+        response_dict['error'] = 'Method not allowed'
+    return json.dumps(response_dict)
+
+@app.route('/games', methods=['POST'])
+def create_game():
+    game_property = {}
+    logging.info(request.data)
+    # convert from string to dictionary
+    dataDictionary = json.loads(request.data)
+    if request.method == 'POST':
+        if 'word' not in dataDictionary or 'hint' not in dataDictionary or dataDictionary['word'] == '':
+            game_property['error'] = 'Bad request, malformed data'
+            abort(400)
+        else:
+            randomWord = WordGame.CreateWordGame(dataDictionary['word'], dataDictionary['hint'])
+            randomWord.put()
+            randomWord.game_id = str(randomWord.key.id())
+            randomWord.put()
+            game_property["hint"] = randomWord.hint
+            game_property["word_length"] = randomWord.word_length
+            game_property["game_id"] = str(randomWord.game_id)
+    else:
+        abort(405)
+        game_property['error'] = 'Method not allowed'
+    return json.dumps(game_property)
 
 @app.route('/games/check_letter/<game_id>', methods=['POST'])
 def game_check_letter(game_id):
@@ -79,28 +147,6 @@ def game_check_letter(game_id):
     response_dict['bad_guesses'] = 3;
     logging.debug(request.data)
     return json.dumps(response_dict)
-
-@app.route('/games/<int:word_length>', methods=['GET', 'POST', 'DELETE'])
-def ongoing_games(word_length):
-    response_dict = {}
-    if request.method == 'GET' or request.method == 'POST':
-        pass
-    elif request.method == 'DELETE':
-        pass
-    else:
-        abort(405)
-        response_dict['error'] = 'Method not allowed'
-    return json.dumps(response_dict)
-
-@app.route('/games', methods=['POST'])
-def create_game():
-    logging.debug(request.data)
-    logging.debug(request.get_json())
-    game_property = {}
-    game_property["hint"] = "I'm a word"
-    game_property["word_length"] = 7
-    game_property["game_id"] = "rrf"
-    return json.dumps(game_property)
 
 @app.route('/token', methods=['GET', 'POST'])
 def token():
@@ -123,7 +169,7 @@ def token():
         else:
             # this is the sign in method! So it will need to query from the ndb!
             session['user'] = auth.username
-            session['score'] = playerData.games_lost
+            session['score'] = playerData.games_won
             session['usertype'] = playerData.UserType
             logging.info("Player Token ID: {}".format(playerData.key.id()))
             response_dict['token'] = playerData.key.id()
@@ -162,7 +208,7 @@ def admin_page():
 
 @app.route('/admin/players')
 def admin_players():
-    logging.debug(request.args)
+    logging.info(request.args)
     response_list = []
     
     for i in range(10):
@@ -194,24 +240,23 @@ def logout():
     session.clear()
     return redirect(url_for('main'))
 
-@app.route('/new_game', methods=['POST'])
-def new_game():
-    """ Return a random word """
-    # words from http://randomword.setgetgo.com/get.php
-    word_to_guess = urllib2.urlopen('http://randomword.setgetgo.com/get.php').read()
-    
-    session['word_to_guess'] = word_to_guess.upper()
-    session['word_state'] = ["_"] * len(word_to_guess)
-    session['bad_guesses'] = 0
-
-    # if there was no record of scores, we set it to 0
-    if 'games_won' not in session:
-        session['games_won'] = 0
-    if 'games_lost' not in session:
-        session['games_lost'] = 0
-    logging.debug("word to guess = %s" % word_to_guess)
-    #return escape(session)
-    return json.dumps({'word_length' : len(word_to_guess)})
+#@app.route('/new_game', methods=['POST'])
+#def new_game():
+#    """ Return a random word """
+#    # words from http://randomword.setgetgo.com/get.php
+#    word_to_guess = urllib2.urlopen('http://randomword.setgetgo.com/get.php').read()
+#    
+#    session['word_to_guess'] = word_to_guess.upper()
+#    session['word_state'] = ["_"] * len(word_to_guess)
+#    session['bad_guesses'] = 0#
+#    # if there was no record of scores, we set it to 0
+#    if 'games_won' not in session:
+#        session['games_won'] = 0
+#    if 'games_lost' not in session:
+#        session['games_lost'] = 0
+#    logging.debug("word to guess = %s" % word_to_guess)
+#    #return escape(session)
+#    return json.dumps({'word_length' : len(word_to_guess)})
 
 @app.route('/check_letter', methods=['POST'])
 def check_letter():
