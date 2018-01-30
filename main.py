@@ -3,6 +3,7 @@
 # Import the Flask Framework
 from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort, session, escape
 from google.appengine.ext import ndb
+from werkzeug.security import generate_password_hash, check_password_hash
 # import requests failed miserably!
 import logging
 import urllib2
@@ -95,6 +96,10 @@ def games(game_id):
             game_property['hint'] = specificWord.hint
             game_property['word_length'] = specificWord.word_length
             game_property['game_id'] = specificWord.game_id
+            playerDatabase = User.query(User.Username == session['user'])
+            thePlayer = playerDatabase.get()
+            thePlayer.games_played += 1
+            thePlayer.put()
             return render_template('game.html', game_property = game_property)
         elif request.method == 'DELETE':
             logging.info('deleteing the specific game')
@@ -145,7 +150,7 @@ def create_game():
             game_property["game_id"] = str(randomWord.game_id)
             # record it inside the player's data
             playerDatabase = User.query(User.Username == session['user'])
-            thePlayer = User.get()
+            thePlayer = playerDatabase.get()
             thePlayer.games_created += 1
             thePlayer.put()
     else:
@@ -213,7 +218,7 @@ def game_check_letter(game_id):
                             specificWord.ResetWordGame()
                             # get the player records!
                             playerDatabase = User.query(User.Username == session['user'])
-                            thePlayer = User.get()
+                            thePlayer = playerDatabase.get()
                             thePlayer.games_lost += 1
                             thePlayer.put()
                             return json.dumps(response_dict)
@@ -221,7 +226,7 @@ def game_check_letter(game_id):
                         if specificWord.word == specificWord.word_state:
                             response_dict['game_state'] = 'WIN'
                             playerDatabase = User.query(User.Username == session['user'])
-                            thePlayer = User.get()
+                            thePlayer = playerDatabase.get()
                             thePlayer.games_won += 1
                             thePlayer.put()
                             specificWord.ResetWordGame()
@@ -246,7 +251,7 @@ def token():
     playerData = filteredPlayerData.get()
     if request.method == 'GET':
         # checks whether there is such as player in the database and password is the same
-        if playerData is None or playerData.Password != auth.password:
+        if playerData is None or check_password_hash(playerData.Password, auth.password) == False:
             logging.info("Username or Password is wrong!")
             #abort(404)
             response_dict['error'] = 'User not found'
@@ -266,7 +271,8 @@ def token():
             response_dict['error'] = 'Conflicting user id'
         else:
             # then begin to sign up the user!
-            playerData = User(Username = auth.username, Password = auth.password, UserType = 'User', games_created = 0, games_lost = 0, games_played = 0, games_won = 0)
+            hashedPassword = generate_password_hash(auth.password)
+            playerData = User(Username = auth.username, Password = hashedPassword, UserType = 'User', games_created = 0, games_lost = 0, games_played = 0, games_won = 0)
             # then u put the data into the datastore!
             playerData.put()
             session['user'] = auth.username
@@ -281,56 +287,93 @@ def token():
     # return the token to the client
     return json.dumps(response_dict)
 
-@app.route('/admin')
+@app.route('/admin', methods = ['GET'])
 def admin_page():
-    if 'user' not in session or session['usertype'] != 'Admin':
-        response_dict = {}
-        response_dict['error'] = 'You do not have permission to perform this operation'
-        abort(403)
+    response_dict = {}
+    if check_player_exists() == False or session['usertype'] != 'Admin':
+        response_dict = simper_permission_error()
         return json.dumps(response_dict)
+    elif request.method != 'GET':
+        response_dict['error'] = 'Method not allowed'
+        abort(405)
     return render_template('admin.html')
 
-@app.route('/admin/players')
+@app.route('/admin/players', methods = ['GET'])
 def admin_players():
-    logging.info(request.args)
-    response_list = []
-    
-    for i in range(10):
-        response_dict = {}
-        response_dict["name"] = "Name %d" % i
-        response_dict["games_created"] = 10 + i * 2
-        response_dict["games_played"] = i * 12
-        response_dict["games_won"] = i
-        response_dict["games_lost"] = 10 - i
-        response_list.append(response_dict)
-    return json.dumps(response_list)
+    response_dict = {}
+    if check_player_exists() == False or session['usertype'] != 'Admin':
+        response_dict = simper_permission_error()
+    elif request.method != 'GET':
+        response_dict = simper_method_error()
+    elif 'order' not in request.args or 'sortby' not in request.args:
+        response_dict = simper_malform_data_error()
+    else:
+        response_dict = []
+        # query for players only! then sort the user database
+        UserDatabase = None
+        if request.args['sortby'] == 'wins':
+            if request.args['order'] == 'desc':
+                UserDatabase = User.query().order(-User.games_won)
+            else:
+                UserDatabase = User.query().order(User.games_won)
+        elif request.args['sortby'] == 'losses':
+            if request.args['order'] == 'desc':
+                UserDatabase = User.query().order(-User.games_lost)
+            else:
+                UserDatabase = User.query().order(User.games_lost)
+        elif request.args['sortby'] == 'alphabetical':
+            if request.args['order'] == 'desc':
+                UserDatabase = User.query().order(-User.Username)
+            else:
+                UserDatabase = User.query().order(User.Username)
+        else:
+            response_dict = simper_malform_data_error()
+        for userData in UserDatabase:
+            userJson = { 'name' : userData.Username, 'games_created' : userData.games_created, 'games_played' : userData.games_played, 'games_won' : userData.games_won, 'games_lost' : userData.games_lost }
+            response_dict.append(userJson)
+    return json.dumps(response_dict)
 
-@app.route('/admin/words')
+@app.route('/admin/words', methods = ['GET'])
 def admin_words():
-    logging.debug(request.args)
-    response_list = []
-    
-    for i in range(10):
-        response_dict = {}
-        response_dict["word"] = "Word %d" % i
-        response_dict["wins"] = 10 + i * 2
-        response_dict["losses"] = i * 12
-        response_list.append(response_dict)
-    return json.dumps(response_list)
+    response_dict = None
+    if check_player_exists() == False or session['usertype'] != 'Admin':
+        response_dict = simper_permission_error()
+    elif request.method != 'GET':
+        response_dict = simper_method_error()
+    elif 'sortby' not in request.args or 'order' not in request.args:
+        response_dict = simper_malform_data_error()
+    else:
+        response_dict = []
+        sortKeyword = request.args['sortby']
+        orderKeyword = request.args['order']
+        wordDatabase = None
+        if sortKeyword == 'solved':
+            if orderKeyword == 'desc':
+                wordDatabase = WordGame.query().order(-WordGame.numbers_of_wins)
+            else:
+                wordDatabase = WordGame.query().order(WordGame.numbers_of_wins)
+        elif sortKeyword == 'length':
+            if orderKeyword == 'desc':
+                wordDatabase = WordGame.query().order(-WordGame.word_length)
+            else:
+                wordDatabase = WordGame.query().order(WordGame.word_length)
+        elif sortKeyword == 'alphabetical':
+            if orderKeyword == 'desc':
+                wordDatabase = WordGame.query().order(-WordGame.word)
+            else:
+                wordDatabase = WordGame.query().order(WordGame.word)
+        else:
+            response_dict = simper_malform_data_error()
+        for theWord in wordDatabase:
+            wordDict = { 'word' : theWord.word, 'wins' : theWord.numbers_of_wins, 'losses' : theWord.numbers_of_losses}
+            response_dict.append(wordDict)
+    return json.dumps(response_dict)
 
 @app.route('/logout')
 def logout():
     # remove the username from the session if it's there
     session.clear()
     return redirect(url_for('main'))
-
-@app.route("/score", methods=['GET', 'DELETE'])
-def get_score():
-    if request.method == 'DELETE':
-        session['games_won'] = 0
-        session['games_lost'] = 0
-    
-    return json.dumps({'games_won': session.get('games_won', 0), 'games_lost': session.get('games_lost', 0) })
 
 @app.errorhandler(400)
 def page_bad_request(e):
@@ -368,3 +411,27 @@ def check_player_exists():
         return True
     else:
         return False
+
+def simper_malform_data_error():
+    abort(400)
+    response_dict = {}
+    response_dict['error'] = 'Bad request, malformed data'
+    return response_dict
+
+def simper_method_error():
+    abort(405)
+    response_dict = {}
+    response_dict['error'] = 'Method not allowed'
+    return response_dict
+
+def simper_permission_error():
+    abort(403)
+    response_dict = {}
+    response_dict['error'] = 'You do not have permission to perform this operation'
+    return response_dict
+
+def simper_page_error():
+    abort(404)
+    response_dict = {}
+    response_dict['error'] = 'Page not found'
+    return response_dict
