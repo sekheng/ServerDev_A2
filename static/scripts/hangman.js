@@ -25,7 +25,7 @@ function init() {
         canvas.getContext('2d').scale(1.5, 1.5);
     }
     initGame(word_length);
-    //checkLetterWithServer('');
+    checkLetterWithServer('');
     //showScore();
 }
 
@@ -54,6 +54,7 @@ function drawScore(score)
 function newGame() {
     // get word from server, and after getting a response, the function calls the initGame function
     requestNewGameFromServer();
+	checkLetterWithServer('');
 }
 
 function initGame(word_length) {

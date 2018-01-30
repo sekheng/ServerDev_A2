@@ -3,12 +3,15 @@
 # Import the Flask Framework
 from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort, session, escape
 from google.appengine.ext import ndb
+from googleapiclient import discovery
+from oauth2client import client
 from werkzeug.security import generate_password_hash, check_password_hash
 # import requests failed miserably!
 import logging
 import urllib2
 import random
 import requests
+import httplib2
 import os
 import string
 import json
@@ -180,8 +183,7 @@ def game_check_letter(game_id):
                     response_dict['bad_guesses'] = specificWord.number_of_tries
                 else:
                     logging.info('Trying to hack through check letter game id!')
-                    response_dict['error'] = 'Bad request, malformed data'
-                abort(400)
+                    response_dict = simper_malform_data_error()
             elif check_player_exists() == False:
                 response_dict['error'] = 'You do not have permission to perform this operation'
                 abort(403)
@@ -286,6 +288,41 @@ def token():
         abort(405)
     # return the token to the client
     return json.dumps(response_dict)
+
+@app.route('/oauth2callback', methods = ['GET'])
+def oauth2callback():
+    flow = client.flow_from_clientsecrets(
+    'client_secret_1069847106666-t8n8vt90pr6148psjpjbqapc2bpj2rai.apps.googleusercontent.com.json',
+    scope='https://www.googleapis.com/auth/plus.login',
+    redirect_uri=url_for('oauth2callback', _external=True))
+    
+    if 'code' not in request.args:
+        logging.info('code not in request.args')
+        auth_uri = flow.step1_get_authorize_url()
+        return redirect(auth_uri)
+    else:
+        auth_code = request.args.get('code')
+        credentials = flow.step2_exchange(auth_code)
+        session['credentials'] = credentials.to_json()
+        return redirect(url_for('/'))
+
+@app.route('/revoke', defaults={'what': ''})
+@app.route('/revoke/<what>')
+def revoke(what):
+    auth_mechanism = []
+    if not what or what == 'token':
+        if 'credentials' in session:
+            credentials = client.OAuth2Credentials.from_json(session['credentials'])
+            credentials.revoke(httplib2.Http())
+        auth_mechanism.append("token")
+    if not what or what == 'session':
+        if 'credentials' in session:        
+            del session['credentials']
+        auth_mechanism.append("session")
+    if not auth_mechanism:
+        auth_mechanism.append("All")
+
+    return "%s Credentials Revoked" % " and ".join(auth_mechanism)
 
 @app.route('/admin', methods = ['GET'])
 def admin_page():
