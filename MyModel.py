@@ -21,8 +21,16 @@ class WordGame(ndb.Model):
 
     @staticmethod
     def CreateWordGame(_word, _hint):
-        MyWord = WordGame(is_deleted = False, word = _word, hint = _hint, word_length = len(_word))
+        MyWord = WordGame(is_deleted = False, word = _word.upper(), hint = _hint, word_length = len(_word))
         MyWord.number_of_tries = 0
+        MyWord.word_state = ""
         for num in range(0, len(_word)):
-            word_state += '_'
+            MyWord.word_state += '_'
         return MyWord
+
+    def ResetWordGame(self):
+        self.word_state = ''
+        for num in range(0, len(self.word)):
+            self.word_state += '_'
+        self.number_of_tries = 0
+        self.put()

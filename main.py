@@ -11,6 +11,7 @@ import requests
 import os
 import string
 import json
+import re
 from MyModel import *
 
 app = Flask(__name__)
@@ -37,7 +38,7 @@ def main():
     # assign a new id to the player if 
     signed_inFlag = False
     sign_in_Username = ''
-    if 'user' in session:
+    if check_player_exists() == True:
         # if it is the admin, redirect it to the admin!
         if session['usertype'] == 'Admin':
             return admin_page()
@@ -60,7 +61,7 @@ def get_all_games():
         response_dict = []
         tableOfRandomWord = WordGame.query(WordGame.is_deleted == False)
         for randomword in tableOfRandomWord:
-            respondWord = {'hint' : randomword.hint, 'word_length' : randomword.word_length, 'game_id' : str(randomword.key.id())}
+            respondWord = {'hint' : randomword.hint, 'word_length' : randomword.word_length, 'game_id' : randomword.game_id }
             response_dict.append(respondWord)
     elif request.method == "DELETE":
         if 'user' not in session and session['usertype'] != 'Admin':
@@ -79,23 +80,28 @@ def get_all_games():
 def games(game_id):
     logging.info("Getting specific game: " + game_id)
     game_property = {}
-    wordDatabase = WordGame.query(WordGame.game_id == game_id)
+    wordDatabase = WordGame.query(ndb.AND(WordGame.game_id == game_id, WordGame.is_deleted == False))
     specificWord = wordDatabase.get()
     if specificWord is None:
+        logging.info('game is not found')
         game_property['error'] = 'Game not found'
+        abort(404)
     else:
         if 'user' not in session:
             abort(403)
             game_property['error'] = 'You do not have permission to perform this operation'
         elif request.method == 'GET':
+            logging.info('beginning the game')
             game_property['hint'] = specificWord.hint
             game_property['word_length'] = specificWord.word_length
             game_property['game_id'] = specificWord.game_id
             return render_template('game.html', game_property = game_property)
         elif request.method == 'DELETE':
+            logging.info('deleteing the specific game')
             specificWord.is_deleted = True
             specificWord.put()
             game_property['message'] = 'Game was deleted'
+            return render_template('main.html', game_property = game_property)
         else:
             game_property['error'] = "Method not allowed"
             abort(405)
@@ -109,7 +115,7 @@ def ongoing_games(word_length):
         response_dict = []
         WordsWithSpecificLength = WordGame.query(ndb.AND(WordGame.word_length == word_length, WordGame.is_deleted == False))
         for word in WordsWithSpecificLength:
-            TheWord = { hint : word.hint, word_length : word.word_length, game_id : word.game_id }
+            TheWord = { 'hint' : word.hint, 'word_length' : word.word_length, 'game_id' : word.game_id }
             response_dict.append(TheWord)
     else:
         abort(405)
@@ -126,26 +132,104 @@ def create_game():
         if 'word' not in dataDictionary or 'hint' not in dataDictionary or dataDictionary['word'] == '':
             game_property['error'] = 'Bad request, malformed data'
             abort(400)
+        elif check_player_exists() == False:
+            game_property['error'] = 'You do not have permission to perform this operation'
+            abort(403)
         else:
             randomWord = WordGame.CreateWordGame(dataDictionary['word'], dataDictionary['hint'])
             randomWord.put()
-            randomWord.game_id = str(randomWord.key.id())
+            randomWord.game_id = 'A' + str(randomWord.key.id())
             randomWord.put()
             game_property["hint"] = randomWord.hint
             game_property["word_length"] = randomWord.word_length
             game_property["game_id"] = str(randomWord.game_id)
+            # record it inside the player's data
+            playerDatabase = User.query(User.Username == session['user'])
+            thePlayer = User.get()
+            thePlayer.games_created += 1
+            thePlayer.put()
     else:
         abort(405)
         game_property['error'] = 'Method not allowed'
     return json.dumps(game_property)
 
-@app.route('/games/check_letter/<game_id>', methods=['POST'])
+@app.route('/games/check_letter/<string:game_id>', methods=['POST'])
 def game_check_letter(game_id):
     response_dict = {}
-    response_dict['game_state'] = "ONGOING"
-    response_dict['word_state'] = "____"
-    response_dict['bad_guesses'] = 3;
-    logging.debug(request.data)
+    # get specific game with the id!
+    wordGameDB = WordGame.query(ndb.AND(WordGame.game_id == game_id, WordGame.is_deleted == False))
+    specificWord = wordGameDB.get()
+    logging.info('specificWord with id: ' + specificWord.game_id)
+    if specificWord is None:
+        response_dict['error'] = 'Game not found'
+        abort(404)
+    else:
+        if request.method == 'POST':
+            # Get the data dictionary
+            dataDictionary = json.loads(request.data)
+            if 'guess' not in dataDictionary or dataDictionary['guess'] is None or (not isinstance(dataDictionary['guess'], basestring)) or len(dataDictionary['guess']) > 1 or not dataDictionary['guess'].isalpha():
+                if dataDictionary['guess'] == '':
+                    # empty string means send back the same data!
+                    response_dict['word_state'] = specificWord.word_state
+                    response_dict['game_state'] = 'ONGOING'
+                    response_dict['bad_guesses'] = specificWord.number_of_tries
+                else:
+                    logging.info('Trying to hack through check letter game id!')
+                    response_dict['error'] = 'Bad request, malformed data'
+                abort(400)
+            elif check_player_exists() == False:
+                response_dict['error'] = 'You do not have permission to perform this operation'
+                abort(403)
+            else:
+                guessedLetter = dataDictionary['guess']
+                # check for regulary expression after meking a thorough check that there is onlyn a single letter
+                reResult = re.match('[A-Za-z]', guessedLetter)
+                if reResult is None:
+                    logging.info('regex test failed')
+                    response_dict['error'] = 'Bad request, malformed data'
+                    abort(400)
+                else:
+                    checkWhetherGuessCorrectly = False
+                    logging.info('checking for correct letter')
+                    # get the list of the specific word
+                    listOfWordState = list(specificWord.word_state)
+                    for num in range(0, len(specificWord.word)):
+                        if guessedLetter == specificWord.word[num]:
+                            checkWhetherGuessCorrectly = True
+                            listOfWordState[num] = guessedLetter
+                    specificWord.word_state = "".join(listOfWordState)
+                    specificWord.put()
+                    logging.info("Current word state: " + specificWord.word_state)
+                    logging.info("Guessed word: " + specificWord.word)
+                    response_dict['game_state'] = 'ONGOING'
+                    response_dict['word_state'] = specificWord.word_state
+                    if checkWhetherGuessCorrectly == False:
+                        specificWord.number_of_tries += 1
+                        specificWord.put()
+                        if specificWord.number_of_tries == 8:
+                            response_dict['game_state'] = 'LOSE'
+                            response_dict['answer'] = specificWord.word
+                            # then add to the player's record
+                            specificWord.ResetWordGame()
+                            # get the player records!
+                            playerDatabase = User.query(User.Username == session['user'])
+                            thePlayer = User.get()
+                            thePlayer.games_lost += 1
+                            thePlayer.put()
+                            return json.dumps(response_dict)
+                    else:
+                        if specificWord.word == specificWord.word_state:
+                            response_dict['game_state'] = 'WIN'
+                            playerDatabase = User.query(User.Username == session['user'])
+                            thePlayer = User.get()
+                            thePlayer.games_won += 1
+                            thePlayer.put()
+                            specificWord.ResetWordGame()
+                            return json.dumps(response_dict)
+                    response_dict['bad_guesses'] = specificWord.number_of_tries
+        else:
+            response_dict['error'] = 'Method not allowed'
+            abort(405)
     return json.dumps(response_dict)
 
 @app.route('/token', methods=['GET', 'POST'])
@@ -171,15 +255,15 @@ def token():
             session['user'] = auth.username
             session['score'] = playerData.games_won
             session['usertype'] = playerData.UserType
-            logging.info("Player Token ID: {}".format(playerData.key.id()))
-            response_dict['token'] = playerData.key.id()
+            response_dict['token'] = str(playerData.key.id())
+            session['token'] = response_dict['token']
     #Ensure that there is no player data!
     elif request.method == 'POST':
         # this is the sign up method! Store the user name and password at the server
         if playerData is not None:
             #throw an error!
             abort(409)
-            response_dict['error'] = 'Conflicitng user id'
+            response_dict['error'] = 'Conflicting user id'
         else:
             # then begin to sign up the user!
             playerData = User(Username = auth.username, Password = auth.password, UserType = 'User', games_created = 0, games_lost = 0, games_played = 0, games_won = 0)
@@ -188,9 +272,9 @@ def token():
             session['user'] = auth.username
             session['score'] = 0
             session['usertype'] = playerData.UserType
-            logging.info("Player Token ID: {}".format(playerData.key.id()))
-            response_dict['token'] = playerData.key.id()
             # generate the token, store it
+            response_dict['token'] = str(playerData.key.id())
+            session['token'] = response_dict['token']
     else:
         response_dict['error'] = 'Method not allowed'
         abort(405)
@@ -240,70 +324,6 @@ def logout():
     session.clear()
     return redirect(url_for('main'))
 
-#@app.route('/new_game', methods=['POST'])
-#def new_game():
-#    """ Return a random word """
-#    # words from http://randomword.setgetgo.com/get.php
-#    word_to_guess = urllib2.urlopen('http://randomword.setgetgo.com/get.php').read()
-#    
-#    session['word_to_guess'] = word_to_guess.upper()
-#    session['word_state'] = ["_"] * len(word_to_guess)
-#    session['bad_guesses'] = 0#
-#    # if there was no record of scores, we set it to 0
-#    if 'games_won' not in session:
-#        session['games_won'] = 0
-#    if 'games_lost' not in session:
-#        session['games_lost'] = 0
-#    logging.debug("word to guess = %s" % word_to_guess)
-#    #return escape(session)
-#    return json.dumps({'word_length' : len(word_to_guess)})
-
-@app.route('/check_letter', methods=['POST'])
-def check_letter():
-    if 'word_to_guess' not in session:
-        reset_score()
-        return redirect(url_for('main'))
-    content = request.get_json()
-    letter = content.get('guess', None).upper()
-    logging.debug("Guessed letter %s" % letter)
-    bad_guess = True
-    game_state = "ONGOING"
-
-    # set the state of the game
-    word_to_guess = session['word_to_guess']
-    for idx, char in enumerate(word_to_guess):
-        if char == letter:
-            session['word_state'][idx] = letter
-            bad_guess = False
-    
-    #check if player is still in game, lose, or win game
-    if bad_guess:
-        session['bad_guesses'] += 1
-        if session['bad_guesses'] > 7:
-            game_state = "LOSE"
-            session['games_lost'] += 1 
-    else:
-        #loop through the word state, if there is an _ character, game is still in progress
-        for c in session['word_state']:
-            if c == '_':
-                break
-        else: # no _ character found, game won!
-            game_state = "WIN"
-            session['games_won'] += 1
-
-    logging.debug(str(session))
-
-    # define the response based on the game state
-    response_dict = {}
-    response_dict['game_state'] = game_state
-    response_dict['word_state'] = "".join(session['word_state'])
-    if game_state == "ONGOING":
-        response_dict['bad_guesses'] = session['bad_guesses']
-    if game_state == "LOSE":
-        response_dict['answer'] = session['word_to_guess'] 
-
-    return json.dumps(response_dict)
-
 @app.route("/score", methods=['GET', 'DELETE'])
 def get_score():
     if request.method == 'DELETE':
@@ -342,3 +362,9 @@ def application_error(e):
     """Return a custom 500 error."""
     logging.info('unexpected error: {}'.format(e), 500)
     return redirect('https://http.cat/500')
+
+def check_player_exists():
+    if 'user' in session and 'usertype' in session and 'token' in session:
+        return True
+    else:
+        return False
