@@ -21,10 +21,14 @@ import threading
 
 import keyring
 
-from oauth2client import client
+from oauth2client.client import Credentials
+from oauth2client.client import Storage as BaseStorage
 
 
-class Storage(client.Storage):
+__author__ = 'jcgregorio@google.com (Joe Gregorio)'
+
+
+class Storage(BaseStorage):
     """Store and retrieve a single credential to and from the keyring.
 
     To use this module you must have the keyring module installed. See
@@ -40,9 +44,9 @@ class Storage(client.Storage):
 
     Usage::
 
-        from oauth2client import keyring_storage
+        from oauth2client.keyring_storage import Storage
 
-        s = keyring_storage.Storage('name_of_application', 'user1')
+        s = Storage('name_of_application', 'user1')
         credentials = s.get()
 
     """
@@ -70,7 +74,7 @@ class Storage(client.Storage):
 
         if content is not None:
             try:
-                credentials = client.Credentials.new_from_json(content)
+                credentials = Credentials.new_from_json(content)
                 credentials.set_store(self)
             except ValueError:
                 pass

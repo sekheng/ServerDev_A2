@@ -304,7 +304,41 @@ def oauth2callback():
         auth_code = request.args.get('code')
         credentials = flow.step2_exchange(auth_code)
         session['credentials'] = credentials.to_json()
-        return redirect(url_for('/'))
+        credentialDict = json.loads(session['credentials'])
+        # start recoding down the credential details
+        session['usertype'] = 'User'
+        #credentialsDict = credentials_to_dict(credentials)
+        session['token'] = credentialDict['refresh_token']
+        http_auth = credentials.authorize(httplib2.Http())
+        plus_service = discovery.build('plus', 'v1', http_auth)
+        playername = plus_service.people().get(userId='me').execute()
+        playerGoogleName = playername['displayName']
+        formatStrClientSecret = str(credentialDict['client_secret'])
+        # we check for client id and secret!
+        UserDatabase = User.query(User.Username == playerGoogleName)
+        specificUser = UserDatabase.get()
+        if specificUser is None:
+            #it is new player! create it!
+            specificUser = User.CreateUser(playerGoogleName, formatStrClientSecret)
+            specificUser.put()
+        session['user'] = specificUser.Username
+        session['score'] = specificUser.games_won
+        return redirect(url_for('main'))
+
+@app.route('/auth')
+def handle_auth_response():
+    if 'error' in request.args:
+        return simper_page_error()
+    else:
+        return None
+
+#def credentials_to_dict(_credentials):
+#    return {'token': _credentials.token,
+#          'refresh_token': _credentials.refresh_token,
+#          'token_uri': _credentials.token_uri,
+#          'client_id': _credentials.client_id,
+#          'client_secret': _credentials.client_secret,
+#          'scopes': _credentials.scopes}
 
 @app.route('/revoke', defaults={'what': ''})
 @app.route('/revoke/<what>')

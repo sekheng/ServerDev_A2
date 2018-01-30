@@ -13,9 +13,12 @@
 # limitations under the License.
 """OpenSSL Crypto-related routines for oauth2client."""
 
+import base64
+
 from OpenSSL import crypto
 
-from oauth2client import _helpers
+from oauth2client._helpers import _parse_pem_key
+from oauth2client._helpers import _to_bytes
 
 
 class OpenSSLVerifier(object):
@@ -42,8 +45,8 @@ class OpenSSLVerifier(object):
             True if message was signed by the private key associated with the
             public key that this object was constructed with.
         """
-        message = _helpers._to_bytes(message, encoding='utf-8')
-        signature = _helpers._to_bytes(signature, encoding='utf-8')
+        message = _to_bytes(message, encoding='utf-8')
+        signature = _to_bytes(signature, encoding='utf-8')
         try:
             crypto.verify(self._pubkey, signature, message, 'sha256')
             return True
@@ -65,7 +68,7 @@ class OpenSSLVerifier(object):
         Raises:
             OpenSSL.crypto.Error: if the key_pem can't be parsed.
         """
-        key_pem = _helpers._to_bytes(key_pem)
+        key_pem = _to_bytes(key_pem)
         if is_x509_cert:
             pubkey = crypto.load_certificate(crypto.FILETYPE_PEM, key_pem)
         else:
@@ -93,7 +96,7 @@ class OpenSSLSigner(object):
         Returns:
             string, The signature of the message for the given key.
         """
-        message = _helpers._to_bytes(message, encoding='utf-8')
+        message = _to_bytes(message, encoding='utf-8')
         return crypto.sign(self._key, message, 'sha256')
 
     @staticmethod
@@ -110,12 +113,12 @@ class OpenSSLSigner(object):
         Raises:
             OpenSSL.crypto.Error if the key can't be parsed.
         """
-        key = _helpers._to_bytes(key)
-        parsed_pem_key = _helpers._parse_pem_key(key)
+        key = _to_bytes(key)
+        parsed_pem_key = _parse_pem_key(key)
         if parsed_pem_key:
             pkey = crypto.load_privatekey(crypto.FILETYPE_PEM, parsed_pem_key)
         else:
-            password = _helpers._to_bytes(password, encoding='utf-8')
+            password = _to_bytes(password, encoding='utf-8')
             pkey = crypto.load_pkcs12(key, password).get_privatekey()
         return OpenSSLSigner(pkey)
 
@@ -130,7 +133,7 @@ def pkcs12_key_as_pem(private_key_bytes, private_key_password):
     Returns:
         String. PEM contents of ``private_key_bytes``.
     """
-    private_key_password = _helpers._to_bytes(private_key_password)
+    private_key_password = _to_bytes(private_key_password)
     pkcs12 = crypto.load_pkcs12(private_key_bytes, private_key_password)
     return crypto.dump_privatekey(crypto.FILETYPE_PEM,
                                   pkcs12.get_privatekey())

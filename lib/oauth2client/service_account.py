@@ -17,14 +17,27 @@
 import base64
 import copy
 import datetime
+import httplib2
 import json
 import time
 
-import oauth2client
-from oauth2client import _helpers
-from oauth2client import client
+from oauth2client import GOOGLE_REVOKE_URI
+from oauth2client import GOOGLE_TOKEN_URI
+from oauth2client._helpers import _json_encode
+from oauth2client._helpers import _from_bytes
+from oauth2client._helpers import _urlsafe_b64encode
+from oauth2client import util
+from oauth2client.client import _apply_user_agent
+from oauth2client.client import _initialize_headers
+from oauth2client.client import AccessTokenInfo
+from oauth2client.client import AssertionCredentials
+from oauth2client.client import clean_headers
+from oauth2client.client import EXPIRY_FORMAT
+from oauth2client.client import GoogleCredentials
+from oauth2client.client import SERVICE_ACCOUNT
+from oauth2client.client import TokenRevokeError
+from oauth2client.client import _UTCNOW
 from oauth2client import crypt
-from oauth2client import transport
 
 
 _PASSWORD_DEFAULT = 'notasecret'
@@ -39,7 +52,7 @@ to .pem format:
 """
 
 
-class ServiceAccountCredentials(client.AssertionCredentials):
+class ServiceAccountCredentials(AssertionCredentials):
     """Service Account credential for OAuth 2.0 signed JWT grants.
 
     Supports
@@ -81,9 +94,9 @@ class ServiceAccountCredentials(client.AssertionCredentials):
     MAX_TOKEN_LIFETIME_SECS = 3600
     """Max lifetime of the token (one hour, in seconds)."""
 
-    NON_SERIALIZED_MEMBERS = (
+    NON_SERIALIZED_MEMBERS =  (
         frozenset(['_signer']) |
-        client.AssertionCredentials.NON_SERIALIZED_MEMBERS)
+        AssertionCredentials.NON_SERIALIZED_MEMBERS)
     """Members that aren't serialized when object is converted to JSON."""
 
     # Can be over-ridden by factory constructors. Used for
@@ -99,8 +112,8 @@ class ServiceAccountCredentials(client.AssertionCredentials):
                  private_key_id=None,
                  client_id=None,
                  user_agent=None,
-                 token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                 revoke_uri=oauth2client.GOOGLE_REVOKE_URI,
+                 token_uri=GOOGLE_TOKEN_URI,
+                 revoke_uri=GOOGLE_REVOKE_URI,
                  **kwargs):
 
         super(ServiceAccountCredentials, self).__init__(
@@ -109,7 +122,7 @@ class ServiceAccountCredentials(client.AssertionCredentials):
 
         self._service_account_email = service_account_email
         self._signer = signer
-        self._scopes = _helpers.scopes_to_string(scopes)
+        self._scopes = util.scopes_to_string(scopes)
         self._private_key_id = private_key_id
         self.client_id = client_id
         self._user_agent = user_agent
@@ -125,8 +138,8 @@ class ServiceAccountCredentials(client.AssertionCredentials):
             strip: array, An array of names of members to exclude from the
                    JSON.
             to_serialize: dict, (Optional) The properties for this object
-                          that will be serialized. This allows callers to
-                          modify before serializing.
+                          that will be serialized. This allows callers to modify
+                          before serializing.
 
         Returns:
             string, a JSON representation of this instance, suitable to pass to
@@ -167,20 +180,18 @@ class ServiceAccountCredentials(client.AssertionCredentials):
                 the keyfile.
         """
         creds_type = keyfile_dict.get('type')
-        if creds_type != client.SERVICE_ACCOUNT:
+        if creds_type != SERVICE_ACCOUNT:
             raise ValueError('Unexpected credentials type', creds_type,
-                             'Expected', client.SERVICE_ACCOUNT)
+                             'Expected', SERVICE_ACCOUNT)
 
         service_account_email = keyfile_dict['client_email']
         private_key_pkcs8_pem = keyfile_dict['private_key']
         private_key_id = keyfile_dict['private_key_id']
         client_id = keyfile_dict['client_id']
         if not token_uri:
-            token_uri = keyfile_dict.get('token_uri',
-                                         oauth2client.GOOGLE_TOKEN_URI)
+            token_uri = keyfile_dict.get('token_uri', GOOGLE_TOKEN_URI)
         if not revoke_uri:
-            revoke_uri = keyfile_dict.get('revoke_uri',
-                                          oauth2client.GOOGLE_REVOKE_URI)
+            revoke_uri = keyfile_dict.get('revoke_uri', GOOGLE_REVOKE_URI)
 
         signer = crypt.Signer.from_string(private_key_pkcs8_pem)
         credentials = cls(service_account_email, signer, scopes=scopes,
@@ -256,8 +267,8 @@ class ServiceAccountCredentials(client.AssertionCredentials):
     def _from_p12_keyfile_contents(cls, service_account_email,
                                    private_key_pkcs12,
                                    private_key_password=None, scopes='',
-                                   token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                                   revoke_uri=oauth2client.GOOGLE_REVOKE_URI):
+                                   token_uri=GOOGLE_TOKEN_URI,
+                                   revoke_uri=GOOGLE_REVOKE_URI):
         """Factory constructor from JSON keyfile.
 
         Args:
@@ -298,8 +309,8 @@ class ServiceAccountCredentials(client.AssertionCredentials):
     @classmethod
     def from_p12_keyfile(cls, service_account_email, filename,
                          private_key_password=None, scopes='',
-                         token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                         revoke_uri=oauth2client.GOOGLE_REVOKE_URI):
+                         token_uri=GOOGLE_TOKEN_URI,
+                         revoke_uri=GOOGLE_REVOKE_URI):
 
         """Factory constructor from JSON keyfile.
 
@@ -336,8 +347,8 @@ class ServiceAccountCredentials(client.AssertionCredentials):
     @classmethod
     def from_p12_keyfile_buffer(cls, service_account_email, file_buffer,
                                 private_key_password=None, scopes='',
-                                token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                                revoke_uri=oauth2client.GOOGLE_REVOKE_URI):
+                                token_uri=GOOGLE_TOKEN_URI,
+                                revoke_uri=GOOGLE_REVOKE_URI):
         """Factory constructor from JSON keyfile.
 
         Args:
@@ -433,7 +444,7 @@ class ServiceAccountCredentials(client.AssertionCredentials):
             ServiceAccountCredentials from the serialized data.
         """
         if not isinstance(json_data, dict):
-            json_data = json.loads(_helpers._from_bytes(json_data))
+            json_data = json.loads(_from_bytes(json_data))
 
         private_key_pkcs8_pem = None
         pkcs12_val = json_data.get(_PKCS12_KEY)
@@ -471,7 +482,7 @@ class ServiceAccountCredentials(client.AssertionCredentials):
         token_expiry = json_data.get('token_expiry', None)
         if token_expiry is not None:
             credentials.token_expiry = datetime.datetime.strptime(
-                token_expiry, client.EXPIRY_FORMAT)
+                token_expiry, EXPIRY_FORMAT)
         return credentials
 
     def create_scoped_required(self):
@@ -491,7 +502,7 @@ class ServiceAccountCredentials(client.AssertionCredentials):
         result._private_key_pkcs12 = self._private_key_pkcs12
         result._private_key_password = self._private_key_password
         return result
-
+ 
     def create_with_claims(self, claims):
         """Create credentials that specify additional claims.
 
@@ -500,8 +511,7 @@ class ServiceAccountCredentials(client.AssertionCredentials):
 
         Returns:
             ServiceAccountCredentials, a copy of the current service account
-            credentials with updated claims to use when obtaining access
-            tokens.
+            credentials with updated claims to use when obtaining access tokens.
         """
         new_kwargs = dict(self._kwargs)
         new_kwargs.update(claims)
@@ -542,11 +552,11 @@ class ServiceAccountCredentials(client.AssertionCredentials):
 
 
 def _datetime_to_secs(utc_time):
-    # TODO(issue 298): use time_delta.total_seconds()
-    # time_delta.total_seconds() not supported in Python 2.6
-    epoch = datetime.datetime(1970, 1, 1)
-    time_delta = utc_time - epoch
-    return time_delta.days * 86400 + time_delta.seconds
+   # TODO(issue 298): use time_delta.total_seconds()
+   # time_delta.total_seconds() not supported in Python 2.6
+   epoch = datetime.datetime(1970, 1, 1)
+   time_delta = utc_time - epoch
+   return time_delta.days * 86400 + time_delta.seconds
 
 
 class _JWTAccessCredentials(ServiceAccountCredentials):
@@ -566,8 +576,8 @@ class _JWTAccessCredentials(ServiceAccountCredentials):
                  private_key_id=None,
                  client_id=None,
                  user_agent=None,
-                 token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                 revoke_uri=oauth2client.GOOGLE_REVOKE_URI,
+                 token_uri=GOOGLE_TOKEN_URI,
+                 revoke_uri=GOOGLE_REVOKE_URI,
                  additional_claims=None):
         if additional_claims is None:
             additional_claims = {}
@@ -596,7 +606,36 @@ class _JWTAccessCredentials(ServiceAccountCredentials):
             h = httplib2.Http()
             h = credentials.authorize(h)
         """
-        transport.wrap_http_for_jwt_access(self, http)
+        request_orig = http.request
+        request_auth = super(_JWTAccessCredentials, self).authorize(http).request
+
+        # The closure that will replace 'httplib2.Http.request'.
+        def new_request(uri, method='GET', body=None, headers=None,
+                        redirections=httplib2.DEFAULT_MAX_REDIRECTS,
+                        connection_type=None):
+            if 'aud' in self._kwargs:
+                # Preemptively refresh token, this is not done for OAuth2
+                if self.access_token is None or self.access_token_expired:
+                    self.refresh(None)
+                return request_auth(uri, method, body,
+                                    headers, redirections,
+                                    connection_type)
+            else:
+                # If we don't have an 'aud' (audience) claim,
+                # create a 1-time token with the uri root as the audience
+                headers = _initialize_headers(headers)
+                _apply_user_agent(headers, self.user_agent)
+                uri_root = uri.split('?', 1)[0]
+                token, unused_expiry = self._create_token({'aud': uri_root})
+
+                headers['Authorization'] = 'Bearer ' + token
+                return request_orig(uri, method, body,
+                                    clean_headers(headers),
+                                    redirections, connection_type)
+
+        # Replace the request method with our own closure.
+        http.request = new_request
+
         return http
 
     def get_access_token(self, http=None, additional_claims=None):
@@ -612,13 +651,13 @@ class _JWTAccessCredentials(ServiceAccountCredentials):
         if additional_claims is None:
             if self.access_token is None or self.access_token_expired:
                 self.refresh(None)
-            return client.AccessTokenInfo(
-              access_token=self.access_token, expires_in=self._expires_in())
+            return AccessTokenInfo(access_token=self.access_token,
+                                   expires_in=self._expires_in())
         else:
             # Create a 1 time token
             token, unused_expiry = self._create_token(additional_claims)
-            return client.AccessTokenInfo(
-              access_token=token, expires_in=self._MAX_TOKEN_LIFETIME_SECS)
+            return AccessTokenInfo(access_token=token,
+                                   expires_in=self._MAX_TOKEN_LIFETIME_SECS)
 
     def revoke(self, http):
         """Cannot revoke JWTAccessCredentials tokens."""
@@ -628,8 +667,8 @@ class _JWTAccessCredentials(ServiceAccountCredentials):
         # JWTAccessCredentials are unscoped by definition
         return True
 
-    def create_scoped(self, scopes, token_uri=oauth2client.GOOGLE_TOKEN_URI,
-                      revoke_uri=oauth2client.GOOGLE_REVOKE_URI):
+    def create_scoped(self, scopes, token_uri=GOOGLE_TOKEN_URI,
+                      revoke_uri=GOOGLE_REVOKE_URI):
         # Returns an OAuth2 credentials with the given scope
         result = ServiceAccountCredentials(self._service_account_email,
                                            self._signer,
@@ -649,28 +688,14 @@ class _JWTAccessCredentials(ServiceAccountCredentials):
         return result
 
     def refresh(self, http):
-        """Refreshes the access_token.
-
-        The HTTP object is unused since no request needs to be made to
-        get a new token, it can just be generated locally.
-
-        Args:
-            http: unused HTTP object
-        """
         self._refresh(None)
 
-    def _refresh(self, http):
-        """Refreshes the access_token.
-
-        Args:
-            http: unused HTTP object
-        """
+    def _refresh(self, http_request):
         self.access_token, self.token_expiry = self._create_token()
 
     def _create_token(self, additional_claims=None):
-        now = client._UTCNOW()
-        lifetime = datetime.timedelta(seconds=self._MAX_TOKEN_LIFETIME_SECS)
-        expiry = now + lifetime
+        now = _UTCNOW()
+        expiry = now + datetime.timedelta(seconds=self._MAX_TOKEN_LIFETIME_SECS)
         payload = {
             'iat': _datetime_to_secs(now),
             'exp': _datetime_to_secs(expiry),

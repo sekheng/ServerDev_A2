@@ -10,6 +10,10 @@ class User(ndb.Model):
     games_played = ndb.IntegerProperty()
     games_won = ndb.IntegerProperty()
 
+    @staticmethod
+    def CreateUser(_username, _password):
+        return User(Username = _username, Password = _password, UserType = "User", games_created = 0, games_lost = 0, games_played = 0, games_won = 0)
+
 class WordGame(ndb.Model):
     is_deleted = ndb.BooleanProperty()
     word = ndb.StringProperty()

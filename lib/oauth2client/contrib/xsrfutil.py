@@ -19,8 +19,13 @@ import binascii
 import hmac
 import time
 
-from oauth2client import _helpers
+from oauth2client._helpers import _to_bytes
+from oauth2client import util
 
+__authors__ = [
+    '"Doug Coker" <dcoker@google.com>',
+    '"Joe Gregorio" <jcgregorio@google.com>',
+]
 
 # Delimiter character
 DELIMITER = b':'
@@ -29,7 +34,7 @@ DELIMITER = b':'
 DEFAULT_TIMEOUT_SECS = 60 * 60
 
 
-@_helpers.positional(2)
+@util.positional(2)
 def generate_token(key, user_id, action_id='', when=None):
     """Generates a URL-safe token for the given user, action, time tuple.
 
@@ -44,12 +49,12 @@ def generate_token(key, user_id, action_id='', when=None):
     Returns:
         A string XSRF protection token.
     """
-    digester = hmac.new(_helpers._to_bytes(key, encoding='utf-8'))
-    digester.update(_helpers._to_bytes(str(user_id), encoding='utf-8'))
+    digester = hmac.new(_to_bytes(key, encoding='utf-8'))
+    digester.update(_to_bytes(str(user_id), encoding='utf-8'))
     digester.update(DELIMITER)
-    digester.update(_helpers._to_bytes(action_id, encoding='utf-8'))
+    digester.update(_to_bytes(action_id, encoding='utf-8'))
     digester.update(DELIMITER)
-    when = _helpers._to_bytes(str(when or int(time.time())), encoding='utf-8')
+    when = _to_bytes(str(when or int(time.time())), encoding='utf-8')
     digester.update(when)
     digest = digester.digest()
 
@@ -57,7 +62,7 @@ def generate_token(key, user_id, action_id='', when=None):
     return token
 
 
-@_helpers.positional(3)
+@util.positional(3)
 def validate_token(key, token, user_id, action_id="", current_time=None):
     """Validates that the given token authorizes the user for the action.
 

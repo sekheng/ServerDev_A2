@@ -14,10 +14,11 @@
 
 """Dictionary storage for OAuth2 Credentials."""
 
-from oauth2client import client
+from oauth2client.client import OAuth2Credentials
+from oauth2client.client import Storage
 
 
-class DictionaryStorage(client.Storage):
+class DictionaryStorage(Storage):
     """Store and retrieve credentials to and from a dictionary-like object.
 
     Args:
@@ -45,7 +46,7 @@ class DictionaryStorage(client.Storage):
         if serialized is None:
             return None
 
-        credentials = client.OAuth2Credentials.from_json(serialized)
+        credentials = OAuth2Credentials.from_json(serialized)
         credentials.set_store(self)
 
         return credentials

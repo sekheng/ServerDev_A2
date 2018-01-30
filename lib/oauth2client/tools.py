@@ -27,13 +27,14 @@ import sys
 
 from six.moves import BaseHTTPServer
 from six.moves import http_client
-from six.moves import input
 from six.moves import urllib
+from six.moves import input
 
-from oauth2client import _helpers
 from oauth2client import client
+from oauth2client import util
 
 
+__author__ = 'jcgregorio@google.com (Joe Gregorio)'
 __all__ = ['argparser', 'run_flow', 'message_if_missing']
 
 _CLIENT_SECRETS_MESSAGE = """WARNING: Please configure OAuth 2.0
@@ -41,36 +42,10 @@ _CLIENT_SECRETS_MESSAGE = """WARNING: Please configure OAuth 2.0
 To make this sample run you will need to populate the client_secrets.json file
 found at:
 
-   {file_path}
+   %s
 
 with information from the APIs Console <https://code.google.com/apis/console>.
 
-"""
-
-_FAILED_START_MESSAGE = """
-Failed to start a local webserver listening on either port 8080
-or port 8090. Please check your firewall settings and locally
-running programs that may be blocking or using those ports.
-
-Falling back to --noauth_local_webserver and continuing with
-authorization.
-"""
-
-_BROWSER_OPENED_MESSAGE = """
-Your browser has been opened to visit:
-
-    {address}
-
-If your browser is on a different machine then exit and re-run this
-application with the command-line parameter
-
-  --noauth_local_webserver
-"""
-
-_GO_TO_LINK_MESSAGE = """
-Go to the following link in your browser:
-
-    {address}
 """
 
 
@@ -91,7 +66,6 @@ def _CreateArgumentParser():
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         help='Set the logging level of detail.')
     return parser
-
 
 # argparser is an ArgumentParser that contains command-line options expected
 # by tools.run(). Pass it in as part of the 'parents' argument to your own
@@ -123,22 +97,22 @@ class ClientRedirectHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if an error occurred.
         """
         self.send_response(http_client.OK)
-        self.send_header('Content-type', 'text/html')
+        self.send_header("Content-type", "text/html")
         self.end_headers()
-        parts = urllib.parse.urlparse(self.path)
-        query = _helpers.parse_unique_urlencoded(parts.query)
+        query = self.path.split('?', 1)[-1]
+        query = dict(urllib.parse.parse_qsl(query))
         self.server.query_params = query
         self.wfile.write(
-            b'<html><head><title>Authentication Status</title></head>')
+            b"<html><head><title>Authentication Status</title></head>")
         self.wfile.write(
-            b'<body><p>The authentication flow has completed.</p>')
-        self.wfile.write(b'</body></html>')
+            b"<body><p>The authentication flow has completed.</p>")
+        self.wfile.write(b"</body></html>")
 
     def log_message(self, format, *args):
         """Do not log messages to stdout while running as cmd. line program."""
 
 
-@_helpers.positional(3)
+@util.positional(3)
 def run_flow(flow, storage, flags=None, http=None):
     """Core code for a command-line application.
 
@@ -208,11 +182,17 @@ def run_flow(flow, storage, flags=None, http=None):
                 break
         flags.noauth_local_webserver = not success
         if not success:
-            print(_FAILED_START_MESSAGE)
+            print('Failed to start a local webserver listening '
+                  'on either port 8080')
+            print('or port 8090. Please check your firewall settings and locally')
+            print('running programs that may be blocking or using those ports.')
+            print()
+            print('Falling back to --noauth_local_webserver and continuing with')
+            print('authorization.')
+            print()
 
     if not flags.noauth_local_webserver:
-        oauth_callback = 'http://{host}:{port}/'.format(
-            host=flags.auth_host_name, port=port_number)
+        oauth_callback = 'http://%s:%s/' % (flags.auth_host_name, port_number)
     else:
         oauth_callback = client.OOB_CALLBACK_URN
     flow.redirect_uri = oauth_callback
@@ -221,9 +201,21 @@ def run_flow(flow, storage, flags=None, http=None):
     if not flags.noauth_local_webserver:
         import webbrowser
         webbrowser.open(authorize_url, new=1, autoraise=True)
-        print(_BROWSER_OPENED_MESSAGE.format(address=authorize_url))
+        print('Your browser has been opened to visit:')
+        print()
+        print('    ' + authorize_url)
+        print()
+        print('If your browser is on a different machine then '
+              'exit and re-run this')
+        print('application with the command-line parameter ')
+        print()
+        print('  --noauth_local_webserver')
+        print()
     else:
-        print(_GO_TO_LINK_MESSAGE.format(address=authorize_url))
+        print('Go to the following link in your browser:')
+        print()
+        print('    ' + authorize_url)
+        print()
 
     code = None
     if not flags.noauth_local_webserver:
@@ -242,7 +234,7 @@ def run_flow(flow, storage, flags=None, http=None):
     try:
         credential = flow.step2_exchange(code, http=http)
     except client.FlowExchangeError as e:
-        sys.exit('Authentication has failed: {0}'.format(e))
+        sys.exit('Authentication has failed: %s' % e)
 
     storage.put(credential)
     credential.set_store(storage)
@@ -253,4 +245,4 @@ def run_flow(flow, storage, flags=None, http=None):
 
 def message_if_missing(filename):
     """Helpful message to display if the CLIENT_SECRETS file is missing."""
-    return _CLIENT_SECRETS_MESSAGE.format(file_path=filename)
+    return _CLIENT_SECRETS_MESSAGE % filename
