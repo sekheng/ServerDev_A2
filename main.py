@@ -17,6 +17,7 @@ import string
 import json
 import re
 from MyModel import *
+from datetime import *
 
 app = Flask(__name__)
 # Note: We don't need to call run() since our application is embedded within
@@ -28,13 +29,20 @@ app.secret_key = os.urandom(24)
 #logging.getLogger().setLevel(logging.DEBUG)
 
 class UserConflict(Exception):
-	status_code = 409
-	def __init__(self, message, status_code=None, payload=None):
-		Exception.__init__(self)
-		self.message = message
-		if status_code is not None:
-			self.status_code = status_code
-		self.payload = payload
+    status_code = 409
+    def __init__(self, message, status_code=None, payload=None):
+        Exception.__init__(self)
+        self.message = message
+        if status_code is not None:
+           self.status_code = status_code
+        self.payload = payload
+
+def TimeOut_User(func):
+    def function_wrapper(self):
+        # 1st we  to check whether the time is up!
+        if 'CurrentneedDateTime' in session:
+            pass
+    return function_wrapper
 
 @app.route('/')
 def main():
