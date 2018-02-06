@@ -1,7 +1,7 @@
 """`main` is the top level module for your Flask application."""
 
 # Import the Flask Framework
-from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort, session, escape
+from flask import Flask, render_template, url_for, Response, redirect, make_response, request, jsonify, abort, session, escape, app
 from google.appengine.ext import ndb
 from googleapiclient import discovery
 from oauth2client import client
@@ -38,14 +38,19 @@ class UserConflict(Exception):
         self.payload = payload
 
 def TimeOut_User(func):
-    def function_wrapper(self):
-        # 1st we  to check whether the time is up!
-        if 'CurrentneedDateTime' in session:
+    def function_wrapper():
+        # 1st we  to check whether the time is up! and player even existed!
+        if 'MyDateTime' in session and check_player_exists():
+            # compare the data time!
             pass
+        return func
     return function_wrapper
 
+@TimeOut_User
 @app.route('/')
 def main():
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(seconds = 99999999)
     """Return a friendly HTTP greeting."""
     # assign a new id to the player if 
     signed_inFlag = False
@@ -272,6 +277,7 @@ def token():
             session['usertype'] = playerData.UserType
             response_dict['token'] = str(playerData.key.id())
             session['token'] = response_dict['token']
+            session['MyDateTime'] = datetime.now()
     #Ensure that there is no player data!
     elif request.method == 'POST':
         # this is the sign up method! Store the user name and password at the server
@@ -484,6 +490,7 @@ def application_error(e):
     """Return a custom 500 error."""
     logging.info('unexpected error: {}'.format(e), 500)
     return redirect('https://http.cat/500')
+
 
 def check_player_exists():
     if 'user' in session and 'usertype' in session and 'token' in session:
