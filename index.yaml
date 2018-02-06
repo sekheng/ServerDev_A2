@@ -24,3 +24,14 @@ indexes:
   - name: games_lost
   - name: games_played
   - name: games_won
+
+- kind: WordGame
+  properties:
+  - name: is_deleted
+  - name: word
+
+- kind: WordGame
+  properties:
+  - name: is_deleted
+  - name: word
+    direction: desc

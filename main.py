@@ -50,7 +50,7 @@ def TimeOut_User(func):
 @app.route('/')
 def main():
     session.permanent = True
-    app.permanent_session_lifetime = timedelta(seconds = 99999999)
+    app.permanent_session_lifetime = timedelta(seconds = 9999999)
     """Return a friendly HTTP greeting."""
     # assign a new id to the player if 
     signed_inFlag = False
@@ -119,10 +119,15 @@ def games(game_id):
             return render_template('game.html', game_property = game_property)
         elif request.method == 'DELETE':
             logging.info('deleteing the specific game')
-            specificWord.is_deleted = True
-            specificWord.put()
-            game_property['message'] = 'Game was deleted'
-            return render_template('main.html', game_property = game_property)
+            playerDatabase = User.query(User.Username == session['user'])
+            thePlayer = playerDatabase.get()
+            if specificWord.owner_id != thePlayer.Username:
+                simper_permission_error()
+            else:
+                specificWord.is_deleted = True
+                specificWord.put()
+                game_property['message'] = 'Game was deleted'
+                return render_template('main.html', game_property = game_property)
         else:
             game_property['error'] = "Method not allowed"
             abort(405)
@@ -157,18 +162,18 @@ def create_game():
             game_property['error'] = 'You do not have permission to perform this operation'
             abort(403)
         else:
-            randomWord = WordGame.CreateWordGame(dataDictionary['word'], dataDictionary['hint'])
+            # record it inside the player's data
+            playerDatabase = User.query(User.Username == session['user'])
+            thePlayer = playerDatabase.get()
+            thePlayer.games_created += 1
+            thePlayer.put()
+            randomWord = WordGame.CreateWordGame(dataDictionary['word'], dataDictionary['hint'], thePlayer.Username)
             randomWord.put()
             randomWord.game_id = 'A' + str(randomWord.key.id())
             randomWord.put()
             game_property["hint"] = randomWord.hint
             game_property["word_length"] = randomWord.word_length
             game_property["game_id"] = str(randomWord.game_id)
-            # record it inside the player's data
-            playerDatabase = User.query(User.Username == session['user'])
-            thePlayer = playerDatabase.get()
-            thePlayer.games_created += 1
-            thePlayer.put()
     else:
         abort(405)
         game_property['error'] = 'Method not allowed'
@@ -434,19 +439,19 @@ def admin_words():
         wordDatabase = None
         if sortKeyword == 'solved':
             if orderKeyword == 'desc':
-                wordDatabase = WordGame.query().order(-WordGame.numbers_of_wins)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(-WordGame.numbers_of_wins)
             else:
-                wordDatabase = WordGame.query().order(WordGame.numbers_of_wins)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(WordGame.numbers_of_wins)
         elif sortKeyword == 'length':
             if orderKeyword == 'desc':
-                wordDatabase = WordGame.query().order(-WordGame.word_length)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(-WordGame.word_length)
             else:
-                wordDatabase = WordGame.query().order(WordGame.word_length)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(WordGame.word_length)
         elif sortKeyword == 'alphabetical':
             if orderKeyword == 'desc':
-                wordDatabase = WordGame.query().order(-WordGame.word)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(-WordGame.word)
             else:
-                wordDatabase = WordGame.query().order(WordGame.word)
+                wordDatabase = WordGame.query(WordGame.is_deleted == False).order(WordGame.word)
         else:
             response_dict = simper_malform_data_error()
         for theWord in wordDatabase:
@@ -459,6 +464,15 @@ def logout():
     # remove the username from the session if it's there
     session.clear()
     return redirect(url_for('main'))
+
+@app.route('/score',methods=['GET'])
+def getScore():
+    if check_player_exists() == False:
+        return simper_permission_error()
+    else:
+        PlayerDB = User.query(User.Username == session['user'])
+        specificPlayer = PlayerDB.get()
+        return jsonify(games_won=specificPlayer.games_won, games_lost=specificPlayer.games_lost)
 
 @app.errorhandler(400)
 def page_bad_request(e):

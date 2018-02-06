@@ -24,9 +24,10 @@ class WordGame(ndb.Model):
     word_state = ndb.StringProperty()
     numbers_of_losses = ndb.IntegerProperty()
     numbers_of_wins = ndb.IntegerProperty()
+    owner_id = ndb.StringProperty()
 
     @staticmethod
-    def CreateWordGame(_word, _hint):
+    def CreateWordGame(_word, _hint, _ownerID):
         MyWord = WordGame(is_deleted = False, word = _word.upper(), hint = _hint, word_length = len(_word))
         MyWord.number_of_tries = 0
         MyWord.word_state = ""
@@ -34,6 +35,7 @@ class WordGame(ndb.Model):
         MyWord.numbers_of_wins = 0
         for num in range(0, len(_word)):
             MyWord.word_state += '_'
+        MyWord.owner_id = _ownerID
         return MyWord
 
     def ResetWordGame(self):
